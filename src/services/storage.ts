@@ -141,6 +141,10 @@ export function getWeekDetails(dateInput: string | Date): WeekInfo {
   };
 }
 
+// Default Supabase Cloud Connection (Auto-syncs across Desktop, Mobile, and Web)
+const DEFAULT_SUPABASE_URL = 'https://repcvjnawtfqgvtgbary.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlcGN2am5hd3RmcWd2dGdiYXJ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMzNjE2NjIsImV4cCI6MjEwODkzNzY2Mn0.erctIdcg17clrdU-5m3pI9JYlcQk7IU196l5PDMYp-o';
+
 // Normalizes any project ref or URL into a proper https://<ref>.supabase.co URL
 function normalizeSupabaseUrl(rawUrl: string): string {
   let url = (rawUrl || '').trim();
@@ -358,9 +362,18 @@ class StorageService {
       }
     }
 
+    // 3. Fallback to preconfigured Supabase database credentials
+    if (DEFAULT_SUPABASE_URL && DEFAULT_SUPABASE_ANON_KEY) {
+      return {
+        url: DEFAULT_SUPABASE_URL,
+        anonKey: DEFAULT_SUPABASE_ANON_KEY,
+        isConnected: true
+      };
+    }
+
     return {
-      url: envUrl || '',
-      anonKey: envKey || '',
+      url: '',
+      anonKey: '',
       isConnected: false
     };
   }
@@ -398,6 +411,526 @@ class StorageService {
 
   public isSupabaseConnected(): boolean {
     return Boolean(this.supabase);
+  }
+
+  // --- FULL TWO-WAY CLOUD DATABASE SYNCHRONIZATION ---
+  public async fetchFromSupabase(): Promise<{ success: boolean; error?: string }> {
+    if (!this.supabase) {
+      return { success: false, error: 'Supabase client not initialized' };
+    }
+
+    try {
+      // 1. Fetch Yards
+      const { data: yardsData, error: yardsErr } = await this.supabase
+        .from('yards')
+        .select('*');
+      if (yardsErr) console.warn('Fetch yards error:', yardsErr.message);
+
+      // 2. Fetch Materials
+      const { data: matData, error: matErr } = await this.supabase
+        .from('materials')
+        .select('*');
+      if (matErr) console.warn('Fetch materials error:', matErr.message);
+
+      // 3. Fetch Parties
+      const { data: partiesData, error: partiesErr } = await this.supabase
+        .from('parties')
+        .select('*');
+      if (partiesErr) console.warn('Fetch parties error:', partiesErr.message);
+
+      // 4. Fetch Operating Expenses
+      const { data: expData, error: expErr } = await this.supabase
+        .from('operating_expenses')
+        .select('*')
+        .order('expense_date', { ascending: false });
+      if (expErr) console.warn('Fetch expenses error:', expErr.message);
+
+      // 5. Fetch Purchases
+      const { data: purData, error: purErr } = await this.supabase
+        .from('purchases')
+        .select('*')
+        .order('purchase_date', { ascending: false });
+      if (purErr) console.warn('Fetch purchases error:', purErr.message);
+
+      // 6. Fetch Sales
+      const { data: salesData, error: salesErr } = await this.supabase
+        .from('sales')
+        .select('*')
+        .order('sale_date', { ascending: false });
+      if (salesErr) console.warn('Fetch sales error:', salesErr.message);
+
+      // 7. Fetch Yard Transfers
+      const { data: trfData, error: trfErr } = await this.supabase
+        .from('yard_transfers')
+        .select('*')
+        .order('transfer_date', { ascending: false });
+      if (trfErr) console.warn('Fetch transfers error:', trfErr.message);
+
+      // 8. Fetch Bardana Records
+      const { data: barData, error: barErr } = await this.supabase
+        .from('bardana_records')
+        .select('*')
+        .order('record_date', { ascending: false });
+      if (barErr) console.warn('Fetch bardana error:', barErr.message);
+
+      // 9. Fetch APMC Settlements
+      const { data: apmcData, error: apmcErr } = await this.supabase
+        .from('apmc_settlements')
+        .select('*')
+        .order('settlement_date', { ascending: false });
+      if (apmcErr) console.warn('Fetch APMC settlements error:', apmcErr.message);
+
+      // 10. Fetch Weekly Hamali Settlements
+      const { data: hamaliData, error: hamaliErr } = await this.supabase
+        .from('weekly_hamali_settlements')
+        .select('*')
+        .order('settlement_date', { ascending: false });
+      if (hamaliErr) console.warn('Fetch hamali settlements error:', hamaliErr.message);
+
+      // Update local storage with Supabase rows
+      if (yardsData && yardsData.length > 0) {
+        const yards: Yard[] = yardsData.map(y => ({
+          id: y.id,
+          name: y.name,
+          type: (y.type === 'apmc_shed' ? 'apmc_shed' : 'personal_yard'),
+          location: y.location || '',
+          capacity_quintals: y.capacity_quintals ? Number(y.capacity_quintals) : undefined,
+          is_active: y.is_active ?? true
+        }));
+        localStorage.setItem(KEYS.YARDS, JSON.stringify(yards));
+      }
+
+      if (matData && matData.length > 0) {
+        const mats: Material[] = matData.map(m => ({
+          id: m.id,
+          name: m.name,
+          local_name: m.local_name || m.name,
+          grade: m.grade || 'Standard FAQ',
+          is_active: m.is_active ?? true
+        }));
+        localStorage.setItem(KEYS.MATERIALS, JSON.stringify(mats));
+      }
+
+      if (partiesData && partiesData.length > 0) {
+        const parties: Party[] = partiesData.map(p => ({
+          id: p.id,
+          name: p.name,
+          type: p.type,
+          phone: p.phone || undefined,
+          city: p.city || undefined,
+          gst_or_license: p.gst_or_license || undefined,
+          is_active: p.is_active ?? true
+        }));
+        localStorage.setItem(KEYS.PARTIES, JSON.stringify(parties));
+      }
+
+      // Map expenses
+      let mappedExpenses: OperatingExpense[] = [];
+      if (expData && expData.length > 0) {
+        mappedExpenses = expData.map(e => ({
+          id: e.id,
+          expense_date: e.expense_date,
+          category: e.category,
+          title: e.title,
+          amount: Number(e.amount),
+          yard_id: e.yard_id || undefined,
+          party_id: e.party_id || undefined,
+          party_name: e.party_name || undefined,
+          purchase_id: e.purchase_id || undefined,
+          sale_id: e.sale_id || undefined,
+          paid_to: e.paid_to,
+          payment_mode: e.payment_mode || 'Cash',
+          payment_status: e.payment_status || 'paid',
+          hamali_details: e.category === 'hamali_loading' ? {
+            work_type: e.hamali_work_type || 'unloading',
+            gang_name: e.hamali_gang_name || e.paid_to || 'Hamal Gang',
+            bag_count: e.hamali_bag_count || undefined,
+            rate_per_bag: e.hamali_rate_per_bag || undefined,
+            vehicle_no: e.hamali_vehicle_no || undefined
+          } : undefined,
+          weekly_settlement_id: e.weekly_settlement_id || undefined,
+          weekly_settlement_date: e.weekly_settlement_date || undefined,
+          client_billing_status: e.client_billing_status || undefined,
+          notes: e.notes || undefined,
+          created_by_name: e.created_by_name || 'Admin',
+          created_at: e.created_at
+        }));
+        localStorage.setItem(KEYS.EXPENSES, JSON.stringify(mappedExpenses));
+      }
+
+      // Purchases (attach inward charges from operating_expenses)
+      if (purData && purData.length > 0) {
+        const purchases: Purchase[] = purData.map(p => {
+          const linkedCharges: TransactionCharge[] = mappedExpenses
+            .filter(e => e.purchase_id === p.id)
+            .map(e => ({
+              id: e.id,
+              category: e.category,
+              title: e.title.replace(/\s*\(Inward Lot:.*?\)/, ''),
+              amount: e.amount,
+              paid_to: e.paid_to,
+              payment_status: e.payment_status,
+              payment_mode: e.payment_mode as any,
+              bag_count: e.hamali_details?.bag_count,
+              rate_per_bag: e.hamali_details?.rate_per_bag,
+              notes: e.notes,
+              created_at: e.created_at
+            }));
+
+          return {
+            id: p.id,
+            purchase_date: p.purchase_date,
+            material_id: p.material_id,
+            yard_id: p.yard_id,
+            party_id: p.party_id,
+            qty_quintals: Number(p.qty_quintals),
+            rate_per_quintal: Number(p.rate_per_quintal),
+            total_amount: Number(p.total_amount),
+            market_category: p.market_category || 'government',
+            market_location: p.market_location || 'Nagpur APMC',
+            market_fee_percent: p.market_fee_percent ? Number(p.market_fee_percent) : 0.85,
+            market_fee_amount: p.market_fee_amount ? Number(p.market_fee_amount) : 0,
+            market_fee_paid: p.market_fee_paid ?? false,
+            charges: linkedCharges,
+            lot_number: p.lot_number || undefined,
+            vehicle_no: p.vehicle_no || undefined,
+            notes: p.notes || undefined,
+            created_by_name: p.created_by_name || 'Admin',
+            created_at: p.created_at
+          };
+        });
+        localStorage.setItem(KEYS.PURCHASES, JSON.stringify(purchases));
+      }
+
+      // Sales (attach outward charges from operating_expenses)
+      if (salesData && salesData.length > 0) {
+        const sales: Sale[] = salesData.map(s => {
+          const linkedCharges: TransactionCharge[] = mappedExpenses
+            .filter(e => e.sale_id === s.id)
+            .map(e => ({
+              id: e.id,
+              category: e.category,
+              title: e.title.replace(/\s*\(Invoice:.*?\)/, '').replace(/\s*\(Challan:.*?\)/, ''),
+              amount: e.amount,
+              paid_to: e.paid_to,
+              payment_status: e.payment_status,
+              payment_mode: e.payment_mode as any,
+              bag_count: e.hamali_details?.bag_count,
+              rate_per_bag: e.hamali_details?.rate_per_bag,
+              notes: e.notes,
+              created_at: e.created_at
+            }));
+
+          return {
+            id: s.id,
+            sale_date: s.sale_date,
+            material_id: s.material_id,
+            yard_id: s.yard_id,
+            party_id: s.party_id,
+            broker_id: s.broker_id || undefined,
+            broker_name: s.broker_name || undefined,
+            brokerage_rate_per_qtl: s.brokerage_rate_per_qtl ? Number(s.brokerage_rate_per_qtl) : undefined,
+            brokerage_total_amount: s.brokerage_total_amount ? Number(s.brokerage_total_amount) : undefined,
+            qty_quintals: Number(s.qty_quintals),
+            rate_per_quintal: Number(s.rate_per_quintal),
+            material_amount: s.material_amount ? Number(s.material_amount) : Number((Number(s.qty_quintals) * Number(s.rate_per_quintal)).toFixed(2)),
+            charges_amount: s.charges_amount ? Number(s.charges_amount) : 0,
+            total_amount: Number(s.total_amount),
+            bardana_bags_used: s.bardana_bags_used ? Number(s.bardana_bags_used) : undefined,
+            bardana_type: s.bardana_type || undefined,
+            bardana_yard_id: s.bardana_yard_id || undefined,
+            bardana_deducted: s.bardana_deducted ?? false,
+            charges: linkedCharges,
+            invoice_no: s.invoice_no || undefined,
+            transporter_name: s.transporter_name || undefined,
+            vehicle_no: s.vehicle_no || undefined,
+            notes: s.notes || undefined,
+            created_by_name: s.created_by_name || 'Admin',
+            created_at: s.created_at
+          };
+        });
+        localStorage.setItem(KEYS.SALES, JSON.stringify(sales));
+      }
+
+      // Transfers
+      if (trfData && trfData.length > 0) {
+        const transfers: YardTransfer[] = trfData.map(t => ({
+          id: t.id,
+          transfer_date: t.transfer_date,
+          material_id: t.material_id,
+          from_yard_id: t.from_yard_id,
+          to_yard_id: t.to_yard_id,
+          qty_quintals: Number(t.qty_quintals),
+          vehicle_no: t.vehicle_no || undefined,
+          transport_cost: t.transport_cost ? Number(t.transport_cost) : 0,
+          notes: t.notes || undefined,
+          created_by_name: t.created_by_name || 'Admin',
+          created_at: t.created_at
+        }));
+        localStorage.setItem(KEYS.TRANSFERS, JSON.stringify(transfers));
+      }
+
+      // Bardana Records
+      if (barData && barData.length > 0) {
+        const bardana: BardanaRecord[] = barData.map(b => ({
+          id: b.id,
+          date: b.record_date,
+          type: b.transaction_type,
+          bardana_type: b.bag_type,
+          bag_condition: b.bag_condition || 'new',
+          qty_bags: Number(b.quantity_bags),
+          rate_per_bag: b.rate_per_bag ? Number(b.rate_per_bag) : undefined,
+          total_amount: b.total_amount ? Number(b.total_amount) : 0,
+          yard_id: b.yard_id,
+          party_id: b.vendor_party_id || undefined,
+          party_name: b.vendor_party_name || undefined,
+          sale_id: b.sale_id || undefined,
+          reference_no: b.invoice_no || undefined,
+          notes: b.notes || undefined,
+          created_by_name: b.created_by_name || 'Admin',
+          created_at: b.created_at
+        }));
+        localStorage.setItem(KEYS.BARDANA, JSON.stringify(bardana));
+      }
+
+      // APMC Settlements
+      if (apmcData && apmcData.length > 0) {
+        const apmcList: APMCSettlement[] = apmcData.map(a => ({
+          id: a.id,
+          date: a.settlement_date,
+          financial_year: 'FY 2026-27',
+          market_category: a.market_category || 'all',
+          settlement_type: a.settlement_type || 'full',
+          amount: Number(a.amount_paid),
+          payment_mode: a.payment_mode || 'Bank Transfer',
+          receipt_no: a.reference_no || '',
+          paid_to: a.market_location || 'Nagpur APMC',
+          notes: a.notes || undefined,
+          created_by_name: a.created_by_name || 'Admin',
+          created_at: a.created_at
+        }));
+        localStorage.setItem(KEYS.APMC_SETTLEMENTS, JSON.stringify(apmcList));
+      }
+
+      // Weekly Hamali Settlements
+      if (hamaliData && hamaliData.length > 0) {
+        const hamaliList: WeeklyHamaliSettlement[] = hamaliData.map(h => ({
+          id: h.id,
+          settlement_date: h.settlement_date,
+          week_key: h.week_key,
+          week_label: h.week_label || h.week_key,
+          week_start_date: h.settlement_date,
+          week_end_date: h.settlement_date,
+          gang_name: h.paid_to || 'Hamal Gang',
+          total_days: 1,
+          total_bags: Number(h.total_bags_cleared || 0),
+          gross_amount: Number(h.total_amount_paid || 0),
+          advance_deduction: 0,
+          net_paid_amount: Number(h.total_amount_paid || 0),
+          payment_mode: h.payment_mode || 'Cash',
+          receipt_no: h.reference_no || '',
+          paid_to: h.paid_to || 'Hamal Gang',
+          expense_ids: [],
+          notes: h.notes || undefined,
+          settled_by_name: h.created_by_name || 'Admin',
+          created_at: h.created_at
+        }));
+        localStorage.setItem(KEYS.WEEKLY_HAMALI_SETTLEMENTS, JSON.stringify(hamaliList));
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('fetchFromSupabase error:', err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Pushes all local storage entities and transactions to Supabase to resolve any out-of-sync state
+  public async pushAllLocalDataToSupabase(): Promise<{ success: boolean; error?: string }> {
+    if (!this.supabase) return { success: false, error: 'Supabase not connected' };
+
+    try {
+      // 1. Push Yards
+      const yards = this.getYards();
+      if (yards.length > 0) {
+        const yardRows = yards.map(y => ({
+          id: y.id,
+          name: y.name,
+          location: y.location || 'APMC Yard',
+          type: (y.type === 'apmc_shed' ? 'apmc_shed' : 'personal_yard'),
+          is_active: y.is_active ?? true
+        }));
+        await this.supabase.from('yards').upsert(yardRows);
+      }
+
+      // 2. Push Materials
+      const materials = this.getMaterials();
+      if (materials.length > 0) {
+        const matRows = materials.map(m => ({
+          id: m.id,
+          name: m.name,
+          local_name: m.local_name || m.name,
+          grade: m.grade || 'Standard FAQ',
+          is_active: m.is_active ?? true
+        }));
+        await this.supabase.from('materials').upsert(matRows);
+      }
+
+      // 3. Push Parties
+      const parties = this.getParties();
+      if (parties.length > 0) {
+        const partyRows = parties.map(p => ({
+          id: p.id,
+          name: p.name,
+          type: p.type,
+          phone: p.phone || null,
+          city: p.city || null,
+          gst_or_license: p.gst_or_license || null,
+          is_active: p.is_active ?? true
+        }));
+        await this.supabase.from('parties').upsert(partyRows);
+      }
+
+      // 4. Push Operating Expenses
+      const expenses = this.getExpenses();
+      if (expenses.length > 0) {
+        const expRows = expenses.map(e => ({
+          id: e.id,
+          expense_date: e.expense_date,
+          category: e.category,
+          title: e.title,
+          amount: e.amount,
+          yard_id: e.yard_id || null,
+          party_id: e.party_id || null,
+          party_name: e.party_name || null,
+          purchase_id: e.purchase_id || null,
+          sale_id: e.sale_id || null,
+          paid_to: e.paid_to || 'Vendor',
+          payment_mode: e.payment_mode || 'Cash',
+          payment_status: e.payment_status || 'paid',
+          hamali_gang_name: e.hamali_details?.gang_name || null,
+          hamali_work_type: e.hamali_details?.work_type || null,
+          hamali_bag_count: e.hamali_details?.bag_count ? parseInt(String(e.hamali_details.bag_count)) : null,
+          hamali_rate_per_bag: e.hamali_details?.rate_per_bag ? parseFloat(String(e.hamali_details.rate_per_bag)) : null,
+          hamali_vehicle_no: e.hamali_details?.vehicle_no || null,
+          weekly_settlement_id: e.weekly_settlement_id || null,
+          weekly_settlement_date: e.weekly_settlement_date || null,
+          client_billing_status: e.client_billing_status || null,
+          notes: e.notes || null,
+          created_by_name: e.created_by_name || 'Admin'
+        }));
+        await this.supabase.from('operating_expenses').upsert(expRows);
+      }
+
+      // 5. Push Purchases
+      const purchases = this.getPurchases();
+      if (purchases.length > 0) {
+        const purRows = purchases.map(p => ({
+          id: p.id,
+          purchase_date: p.purchase_date,
+          material_id: p.material_id,
+          yard_id: p.yard_id,
+          party_id: p.party_id,
+          qty_quintals: p.qty_quintals,
+          rate_per_quintal: p.rate_per_quintal,
+          total_amount: p.total_amount,
+          market_category: p.market_category,
+          market_location: p.market_location,
+          market_fee_percent: p.market_fee_percent,
+          market_fee_amount: p.market_fee_amount,
+          market_fee_paid: p.market_fee_paid,
+          lot_number: p.lot_number || null,
+          vehicle_no: p.vehicle_no || null,
+          notes: p.notes || null,
+          created_by_name: p.created_by_name || 'Admin'
+        }));
+        await this.supabase.from('purchases').upsert(purRows);
+      }
+
+      // 6. Push Sales
+      const sales = this.getSales();
+      if (sales.length > 0) {
+        const saleRows = sales.map(s => ({
+          id: s.id,
+          sale_date: s.sale_date,
+          material_id: s.material_id,
+          yard_id: s.yard_id,
+          party_id: s.party_id,
+          broker_id: s.broker_id || null,
+          broker_name: s.broker_name || null,
+          brokerage_rate_per_qtl: s.brokerage_rate_per_qtl || null,
+          brokerage_total_amount: s.brokerage_total_amount || null,
+          qty_quintals: s.qty_quintals,
+          rate_per_quintal: s.rate_per_quintal,
+          material_amount: s.material_amount,
+          charges_amount: s.charges_amount,
+          total_amount: s.total_amount,
+          bardana_bags_used: s.bardana_bags_used || null,
+          bardana_type: s.bardana_type || null,
+          bardana_yard_id: s.bardana_yard_id || null,
+          bardana_deducted: s.bardana_deducted ?? false,
+          invoice_no: s.invoice_no || null,
+          transporter_name: s.transporter_name || null,
+          vehicle_no: s.vehicle_no || null,
+          notes: s.notes || null,
+          created_by_name: s.created_by_name || 'Admin'
+        }));
+        await this.supabase.from('sales').upsert(saleRows);
+      }
+
+      // 7. Push Transfers
+      const transfers = this.getYardTransfers();
+      if (transfers.length > 0) {
+        const trfRows = transfers.map(t => ({
+          id: t.id,
+          transfer_date: t.transfer_date,
+          material_id: t.material_id,
+          from_yard_id: t.from_yard_id,
+          to_yard_id: t.to_yard_id,
+          qty_quintals: t.qty_quintals,
+          vehicle_no: t.vehicle_no || null,
+          transport_cost: t.transport_cost || 0,
+          notes: t.notes || null,
+          created_by_name: t.created_by_name || 'Admin'
+        }));
+        await this.supabase.from('yard_transfers').upsert(trfRows);
+      }
+
+      // 8. Push Bardana Records
+      const bardana = this.getBardanaRecords();
+      if (bardana.length > 0) {
+        const barRows = bardana.map(b => ({
+          id: b.id,
+          record_date: b.date,
+          transaction_type: b.type,
+          bag_type: b.bardana_type,
+          bag_condition: b.bag_condition || 'new',
+          quantity_bags: b.qty_bags,
+          rate_per_bag: b.rate_per_bag || null,
+          total_amount: b.total_amount || 0,
+          yard_id: b.yard_id,
+          vendor_party_id: b.party_id || null,
+          vendor_party_name: b.party_name || null,
+          invoice_no: b.reference_no || null,
+          sale_id: b.sale_id || null,
+          notes: b.notes || null,
+          created_by_name: b.created_by_name || 'Admin'
+        }));
+        await this.supabase.from('bardana_records').upsert(barRows);
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('pushAllLocalDataToSupabase error:', err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Unified two-way sync: pushes local pending records then pulls freshest cloud records
+  public async syncWithSupabase(): Promise<{ success: boolean; error?: string }> {
+    if (!this.supabase) return { success: false, error: 'Not connected' };
+    await this.pushAllLocalDataToSupabase();
+    return await this.fetchFromSupabase();
   }
 
   // --- ACTIVE USER SESSION ---
@@ -442,14 +975,15 @@ class StorageService {
     localStorage.setItem(KEYS.YARDS, JSON.stringify(yards));
 
     if (this.supabase) {
+      const dbType = newYard.type === 'apmc_shed' ? 'apmc_shed' : 'personal_yard';
       this.supabase.from('yards').upsert([{
         id: newYard.id,
         name: newYard.name,
         location: newYard.location || 'APMC Yard',
-        yard_type: newYard.type || 'personal_godown',
+        type: dbType,
         is_active: newYard.is_active ?? true
       }]).then(({ error }) => {
-        if (error) console.warn('Supabase sync warning for yard:', error.message);
+        if (error) console.error('Supabase sync warning for yard:', error.message);
       });
     }
 

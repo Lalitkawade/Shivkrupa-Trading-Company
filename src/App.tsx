@@ -8,7 +8,8 @@ import {
   Sun,
   Moon,
   ChevronDown,
-  CheckCircle2
+  CheckCircle2,
+  RefreshCw
 } from 'lucide-react';
 import { Sidebar, NavTab } from './components/Sidebar';
 import { LiveStockBoard } from './components/LiveStockBoard';
@@ -105,6 +106,8 @@ export function App() {
   const [masterInitialTab, setMasterInitialTab] = useState<'yards' | 'materials' | 'parties'>('yards');
   const [masterInitialPartyType, setMasterInitialPartyType] = useState<PartyType>('apmc_seller');
 
+  const [isSyncing, setIsSyncing] = useState(false);
+
   // Reload all data
   const refreshData = () => {
     setYards(storage.getYards());
@@ -117,8 +120,24 @@ export function App() {
     setSupabaseConfig(storage.getSupabaseConfig());
   };
 
+  const handleCloudSync = async () => {
+    if (!storage.isSupabaseConnected()) return;
+    setIsSyncing(true);
+    try {
+      await storage.syncWithSupabase();
+      refreshData();
+    } catch (e) {
+      console.error('Cloud sync error:', e);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   useEffect(() => {
     refreshData();
+    if (storage.isSupabaseConnected()) {
+      handleCloudSync();
+    }
   }, []);
 
   const handleOpenShift = (preselected?: { material_id?: string; from_yard_id?: string }) => {
@@ -256,6 +275,23 @@ export function App() {
                 </button>
               </>
             )}
+
+            {/* Cloud Database Sync Pill */}
+            <button
+              onClick={handleCloudSync}
+              disabled={isSyncing}
+              className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-full font-semibold text-xs border transition active:scale-95 cursor-pointer shadow-2xs whitespace-nowrap ${
+                isSyncing 
+                  ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border-blue-300 dark:border-blue-800' 
+                  : supabaseConfig.isConnected
+                    ? 'bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                    : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-300/80 dark:border-slate-700'
+              }`}
+              title="Sync All Data with Supabase Cloud Database"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-blue-600 dark:text-blue-400' : supabaseConfig.isConnected ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`} />
+              <span className="hidden sm:inline">{isSyncing ? 'Syncing...' : supabaseConfig.isConnected ? 'Cloud Sync' : 'Sync'}</span>
+            </button>
 
             {/* Master Setup Quick Trigger (Add Yard / Commodity / Party) */}
             <button

@@ -24,6 +24,22 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({
   const [anonKey, setAnonKey] = useState(config.anonKey || '');
   const [copiedSql, setCopiedSql] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleSyncNow = async () => {
+    setIsSyncing(true);
+    setStatusMsg('Synchronizing with Supabase Cloud database...');
+    const res = await storage.syncWithSupabase();
+    setIsSyncing(false);
+    if (res.success) {
+      setStatusMsg('Two-way sync complete! All records matched with Supabase.');
+      setTimeout(() => {
+        onConfigUpdated();
+      }, 600);
+    } else {
+      setStatusMsg('Sync error: ' + (res.error || 'Failed to sync with Supabase'));
+    }
+  };
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,16 +114,29 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({
                 ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-800 dark:text-emerald-300' 
                 : 'bg-amber-500/10 border-amber-500/20 text-amber-800 dark:text-amber-300'
             }`}>
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 flex-shrink-0" />
-                <p className="text-xs font-bold">
-                  {config.isConnected ? 'Cloud PostgreSQL Connected' : 'Local-First Demo Database Active'}
-                </p>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 flex-shrink-0" />
+                  <p className="text-xs font-bold">
+                    {config.isConnected ? 'Cloud PostgreSQL Connected' : 'Local-First Demo Database Active'}
+                  </p>
+                </div>
+                {config.isConnected && (
+                  <button
+                    type="button"
+                    onClick={handleSyncNow}
+                    disabled={isSyncing}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition active:scale-95 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                    <span>{isSyncing ? 'Syncing...' : 'Sync Cloud Now'}</span>
+                  </button>
+                )}
               </div>
-              <p className="text-[11px] mt-1 opacity-90">
+              <p className="text-[11px] mt-1.5 opacity-90">
                 {config.isConnected 
-                  ? 'All transactions, stock levels, and yard shifts are synchronized live to Supabase.' 
-                  : 'The portal is currently storing all entries in browser storage. Enter your Supabase credentials below to sync with your free cloud database.'}
+                  ? 'All transactions, stock levels, and yard shifts are synchronized live to Supabase. Tap "Sync Cloud Now" to immediately exchange all records between devices.' 
+                  : 'The portal is currently storing entries in browser storage. Enter your Supabase credentials below to sync across all your devices.'}
               </p>
             </div>
 

@@ -10,7 +10,8 @@ import {
   X,
   Receipt,
   LogOut,
-  Wheat
+  Wheat,
+  Database
 } from 'lucide-react';
 import type { UserProfile, SupabaseConfig, Yard, Party } from '../types';
 
@@ -42,7 +43,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   parties,
   mobileOpen,
   onCloseMobile,
-  onLogout
+  onLogout,
+  supabaseConfig,
+  onOpenSupabaseModal
 }) => {
   const apmcShedsCount = yards.filter(y => y.type === 'apmc_shed').length;
   const personalYardsCount = yards.filter(y => y.type === 'personal_yard').length;
@@ -210,6 +213,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Bottom User Profile & Apple/Samsung Segmented Controls */}
         <div className="p-3 border-t border-slate-800/80 space-y-2.5 bg-[#070d1e]/90">
           
+          {/* Cloud Database Status */}
+          {onOpenSupabaseModal && (
+            <button
+              onClick={onOpenSupabaseModal}
+              className="w-full p-2 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-slate-700 transition flex items-center justify-between text-[11px] text-slate-300 cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <Database className={`w-3.5 h-3.5 ${supabaseConfig?.isConnected ? 'text-emerald-400' : 'text-amber-400'}`} />
+                <span className="font-semibold">{supabaseConfig?.isConnected ? 'Supabase Live' : 'Local Storage Mode'}</span>
+              </div>
+              <span className={`w-2 h-2 rounded-full ${supabaseConfig?.isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+            </button>
+          )}
+
           {/* Integrated User Profile Card with Inline Sign Out */}
           <div className="p-2.5 rounded-2xl bg-slate-800/90 border border-slate-700/60 shadow-sm flex items-center justify-between gap-2.5">
             <div className="flex items-center gap-2.5 min-w-0">
